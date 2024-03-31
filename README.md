@@ -1,1 +1,2 @@
-# battleship_server
+# Battleship P2P server'
+
