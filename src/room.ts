@@ -141,15 +141,35 @@ export class Room {
 		}
 	}
 
-	public async broadcastShot(userId: string, coordinates: { row: number, col: number }) {
+	public async vsPlayer(attacker: PlayerData, reciever: PlayerData) {
+
+	}
+
+	public async vsComputer(attacker: PlayerData, reciever: PlayerData) {
+
+	}
+
+	public async continousShots(userId: string, coordinates: { row: number, col: number }) {
 		if (!this.roomData || this.roomData.status === 'ended') return;
 		if (this.roomData.turn !== userId) return;
-		const { row, col } = coordinates;
+
 		const [id1, id2] = Object.keys(this.players);
 		const attacker = userId === id1 ? this.players[id1] : this.players[id2];
 		const reciever = userId === id1 ? this.players[id2] : this.players[id1];
-		const hitData = reciever.inst.recieveShot(row, col);
-		this.roomData.turn = reciever.playerId
+
+		let hitData: {
+			report: 0 | 1 | 2 | 3;
+			details: {
+				ship: string
+			} | null;
+		}
+
+		const { row, col } = coordinates;
+
+		hitData = reciever.inst.recieveShot(row, col);
+		if (hitData.report === 0) {
+			this.roomData.turn = reciever.playerId;
+		}
 
 		if (hitData.report === 3) {
 			this.roomData.winner = userId;
@@ -185,20 +205,86 @@ export class Room {
 		}
 	}
 
-	private async computerPlays(attacker: PlayerData, reciever: PlayerData) {
-		setTimeout(() => {
-			if (!this.roomData) return;
-			if (reciever.inst instanceof Computer && this.roomData.turn === reciever.playerId) {
-				const cell = reciever.inst.getNextMove(attacker.inst.board.getBoard())
-				this.broadcastShot(reciever.playerId, cell)
+	public async broadcastShot(userId: string, coordinates: { row: number, col: number }) {
+		if (!this.roomData || this.roomData.status === 'ended') return;
+		if (this.roomData.turn !== userId) return;
+
+		let hitData: {
+			report: 0 | 1 | 2 | 3;
+			details: {
+				ship: string;
+			} | null;
+		};
+
+		const { row, col } = coordinates;
+		const [id1, id2] = Object.keys(this.players);
+		const attacker = userId === id1 ? this.players[id1] : this.players[id2];
+		const reciever = userId === id1 ? this.players[id2] : this.players[id1];
+
+		hitData = reciever.inst.recieveShot(row, col);
+		if (hitData.report === 0) {
+			this.roomData.turn = reciever.playerId;
+		}
+
+		if (hitData.report === 3) {
+			this.roomData.winner = userId;
+			this.roomData.status = 'ended';
+		}
+
+		const data = {
+			hitData,
+			room: this.roomData
+		}
+
+		if (attacker.inst instanceof Computer) {
+			if (reciever._ws) {
+				this.send(reciever._ws, Events.RECEIVED_SHOT, {
+					...data,
+					user: { ...reciever.inst.data_to_self() },
+				})
 			}
-		}, 4000);
+			if (hitData.report === 1 || hitData.report === 2) {
+				this.computerPlays(reciever, attacker);
+			}
+		} else if (reciever.inst instanceof Computer) {
+			if (attacker._ws) {
+				this.send(attacker._ws, Events.FIRE_SHOT, {
+					...data,
+					opponent: { ...reciever.inst.data_to_opponent() },
+				})
+			}
+			if (hitData.report === 0) {
+				this.computerPlays(attacker, reciever);
+			}
+		} else {
+			if (reciever.ready && reciever._ws) {
+				this.send(reciever._ws, Events.RECEIVED_SHOT, {
+					...data,
+					user: { ...reciever.inst.data_to_self() },
+				})
+			}
+			if (attacker.ready && attacker._ws) {
+				this.send(attacker._ws, Events.FIRE_SHOT, {
+					...data,
+					opponent: { ...reciever.inst.data_to_opponent() },
+				})
+			}
+		}
+	}
+
+	private async computerPlays(attacker: PlayerData, reciever: PlayerData) {
+		if (!this.roomData) return;
+		if (reciever.inst instanceof Computer && this.roomData.turn === reciever.playerId) {
+			const cell = reciever.inst.getNextMove(attacker.inst.board.getBoard())
+			setTimeout(() => {
+				this.broadcastShot(reciever.playerId, cell);
+			}, 4000)
+		}
 	}
 
 	private send(ws: WebSocket, type: string, data?: { [key: string]: unknown }) {
 		if (ws.readyState === WebSocket.OPEN) {
 			const message = { type, data };
-			console.log(message)
 			ws.send(JSON.stringify(message));
 		} else {
 			console.warn('WebSocket connection not open');
